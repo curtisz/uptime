@@ -3,11 +3,13 @@
  */
 
 var http       = require('http');
+var https      = require('https');
 var url        = require('url');
 var express    = require('express');
 var config     = require('config');
 var socketIo   = require('socket.io');
 var fs         = require('fs');
+var getopt     = require('node-getopt');
 var monitor    = require('./lib/monitor');
 var analyzer   = require('./lib/analyzer');
 var CheckEvent = require('./models/checkEvent');
@@ -15,6 +17,32 @@ var Ping       = require('./models/ping');
 var PollerCollection = require('./lib/pollers/pollerCollection');
 var apiApp     = require('./app/api/app');
 var dashboardApp = require('./app/dashboard/app');
+
+// patch in CLI options to specify your SSL stuff
+
+var cli_opts = getopt.create([
+  ['h', 'help', 'display this help'],
+  ['s', 'ssl', 'enable https server instead of http. requires options cert and privkey.'],
+  ['', 'cert=ARG', 'SSL certificate'],
+  ['', 'privkey=ARG', 'SSL private key']
+])
+  .bindHelp()
+  .parseSystem();
+
+var server;
+if (cli_opts.options.ssl === true || cli_opts.options.s === true) {
+  if (typeof(cli_opts.options.cert) === 'undefined' || typeof(cli_opts.options.privkey) === 'undefined') {
+    console.log('nope. if you want an HTTPS server you need to specify both cert and privkey.');
+    process.exit(1);
+  }
+  var ssl_opts = {
+    privateKey: fs.readFileSync(cli_opts.options.cert),
+    certificate: fs.readFileSync(cli_opts.options.privkey)
+  };
+  server = https.createServer(ssl_opts, app);
+} else {
+  server = http.createServer(app);
+}
 
 // database
 
@@ -26,7 +54,6 @@ a.start();
 // web front
 
 var app = module.exports = express();
-var server = http.createServer(app);
 
 app.configure(function(){
   app.use(app.router);
@@ -149,7 +176,7 @@ if (!module.parent) {
   } else {
     port = serverUrl.port;
     if (port === null) {
-      port = 80;
+      port = (cli_opts.options.s === true || cli_opts.options.ssl === true) ? 443 : 80;
     }
   }
   var port = process.env.PORT || port;
